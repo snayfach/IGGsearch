@@ -1,9 +1,6 @@
-
 #!/usr/bin/env python
 
-import io, os, stat, sys, resource, gzip, platform, bz2, Bio.SeqIO
-
-__version__ = '1.3.0'
+import io, os, stat, sys, resource, gzip, platform, bz2
 
 def which(program):
 	""" Mimics unix 'which' function """
@@ -20,17 +17,6 @@ def which(program):
 			if is_exe(exe_file):
 				return exe_file
 	return None
-
-def print_copyright(log=None):
-	lines = []
-	lines.append("")
-	lines.append("MIDAS: Metagenomic Intra-species Diversity Analysis System")
-	lines.append("version %s; github.com/snayfach/MIDAS" % __version__)
-	lines.append("Copyright (C) 2015-2016 Stephen Nayfach")
-	lines.append("Freely distributed under the GNU General Public License (GPLv3)")
-	lines.append("")
-	if log is not None: log.write('\n'.join(lines)+'\n')
-	sys.stdout.write('\n'.join(lines)+'\n')
 
 def auto_detect_file_type(inpath):
 	""" Detect file type [fasta or fastq] of <p_reads> """
