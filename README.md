@@ -7,9 +7,15 @@ Quantification of gut lineages from IGGdb from metagenomes
 `git clone https://github.com/snayfach/IGGsearch`
 
 <b>Download the reference database:</b>  
-1. Use the [dropbox link] (https://www.dropbox.com/s/i4foka1e2ie3r2c/iggsearch_db_v1.0.tar.gz?dl=0), or install via wget:  
-`wget https://www.dropbox.com/s/i4foka1e2ie3r2c/iggsearch_db_v1.0.tar.gz?dl=0`  
-2. Unpack the database: `tar -zxvf iggsearch_db_v1.0.tar.gz`   
+
+From your browser:   
+[http://lighthouse.ucsf.edu/IGGdb/iggsearch_db_v1.0.tar.gz](http://lighthouse.ucsf.edu/IGGdb/iggsearch_db_v1.0.tar.gz)
+
+Or, from the command line:   
+on Unix: `wget http://lighthouse.ucsf.edu/IGGdb/iggsearch_db_v1.0.tar.gz`  
+on OSX: `curl http://lighthouse.ucsf.edu/IGGdb/iggsearch_db_v1.0.tar.gz > iggsearch_db_v1.0.tar.gz`
+
+Unpack the database: `tar -zxvf iggsearch_db_v1.0.tar.gz`   
 
 <b>Install the hs-blastn alignment tool:</b>  
 1. `git clone https://github.com/chenying2016/queries.git`  
