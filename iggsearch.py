@@ -2,7 +2,7 @@
 
 import os, sys, subprocess as sp, numpy as np, time, shutil
 
-class Taxon:
+class Species:
 	def __init__(self):
 		self.genes = {}
 		self.reads = 0
@@ -19,6 +19,7 @@ class Gene:
 		self.reads = 0
 		self.bases = 0
 		self.depth = 0
+		self.weight = None
 
 def parse_arguments():
 	""" Parse command line arguments """
@@ -43,12 +44,17 @@ Use comma ',' to separate multiple input files""")
 	io.add_argument('-d', type=str, dest='db', default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None,
 		help="""Path to reference database
 By default, the MAG_DB environmental variable is used""")
-	io.add_argument('--skip', action='store_true', default=False,
-		help=argparse.SUPPRESS)
+
 	io.add_argument('-w', dest='weight', choices=['score', 'intra_freq', 'inter_freq', 'none'], default=None,
 		help="weight genes based on their score, intra-clade frequency, or inter-clade frequency")
 	io.add_argument('--min_intra_freq', type=float, default=0.0)
 	io.add_argument('--max_inter_freq', type=float, default=100.0)
+	
+	io.add_argument('--check', action='store_true', default=False,
+		help=argparse.SUPPRESS)
+	io.add_argument('--test', action='store_true', default=False,
+		help=argparse.SUPPRESS)
+	io.add_argument('--max_genes', type=int, help=argparse.SUPPRESS)
 
 	align = parser.add_argument_group('Read alignment options')
 	align.add_argument('-n', type=int, dest='max_reads',
@@ -64,13 +70,19 @@ By default, the MAG_DB environmental variable is used""")
 	return args
 
 def check_args(args):
-	""" Check validity of command line arguments """
+
 	# check database
 	utility.check_database(args)
-	args['db'] = args['db']+'/csmgs.ffn'
+	
+	if args['test']:
+		args['max_reads'] = 1000
+		args['max_genes'] = 100000
+		args['check'] = True
+	
 	# create output directory
 	if not os.path.isdir(args['outdir']):
 		os.makedirs(args['outdir'])
+	
 	# check input file paths
 	for arg in ['m1', 'm2']:
 		if not args[arg]:
@@ -78,9 +90,11 @@ def check_args(args):
 		for file in args[arg].split(','):
 			if not os.path.isfile(file):
 				sys.exit("\nError: Input file does not exist: '%s'\n" % file)
+
 	# input options
 	if args['m2'] and not args['m1']:
 		sys.exit("\nError: Must specify -1 and -2 if aligning paired end reads\n")
+
 	# sanity check input values
 	if args['mapid'] < 1 or args['mapid'] > 100:
 		sys.exit("\nError: MAPID must be between 1 and 100\n")
@@ -90,93 +104,78 @@ def check_args(args):
 def init_db_info():
 	
 	db = {}
-	
-	for line in open('%s' % args['db']):
+	file = open('%s/markers.tsv' % args['db'])
+	next(file)
+	for index, line in enumerate(file):
 		
-		# parse lines
-		if line[0] != '>': continue
-		gene_id = line.split()[0].lstrip('>')
-		taxon, cluster, genome, gene = gene_id.split('|')
-		info = dict([(_.split(':')[0], float(_.split(':')[1])) for _ in line.split(' ', 1)[1].split()])
+		# truncate database in testing mode
+		if args['max_genes'] and index == args['max_genes']: break
 		
-		# get ids
-		if taxon.split('_')[0] == 'subspecies':
-			spid = taxon.split('_')[1]
-			ssid = taxon.split('_', 1)[1]
-		else:
-			spid = taxon.split('_')[1]
-			ssid = None
+		# parse line
+		row = line.rstrip().split('\t')
+		species_id, cluster_id, genome_id, gene_id, rank, length, missing, freq, num_hits, sum_hits, max_hits, all_hits = row
 		
 		# init objects
-		if spid not in db:
-			db[spid] = Taxon()
-			db[spid].subspecies = {}
-		if (ssid
-				and ssid not in db[spid].subspecies):
-			db[spid].subspecies[ssid] = Taxon()
+		if species_id not in db:
+			db[species_id] = Species()
 
-		# filter genes
-		if info['intra_freq'] < args['min_intra_freq']:
-			continue
-		elif info['inter_freq'] > args['max_inter_freq']:
-			continue
+		# TO DO: filter genes
+		# ALSO: consider filtering species
+		pass
 
 		# store gene
+		# TO DO: add more info
 		gene = Gene()
-		gene.length = int(info['length'])
-		gene.intra_freq = info['intra_freq']
-		gene.inter_freq = info['inter_freq']
-		gene.score = info['score']
-		if ssid:
-			db[spid].subspecies[ssid].genes[gene_id] = gene
-		else:
-			db[spid].genes[gene_id] = gene
+		gene.length = int(length)
+		gene.intra_freq = float(freq)
+		gene.inter_freq = float(sum_hits)
+		db[species_id].genes[cluster_id] = gene
 
 	# compute some summary statistics
-	for spid, sp in db.items():
+	for id, sp in db.items():
 		sp.num_genes = len(sp.genes)
 		if sp.num_genes > 0:
-			sp.max_score = max([g.score for g in sp.genes.values()])
 			sp.length = sum([g.length for g in sp.genes.values()])
-		for ss in sp.subspecies.values():
-			ss.num_genes = len(ss.genes)
-			if ss.num_genes > 0:
-				ss.max_score = max([g.score for g in ss.genes.values()])
-				ss.length = sum([g.length for g in ss.genes.values()])
 
-	# compute gene weights
-	for spid, sp in db.items():
-		if sp.num_genes > 0:
-			weights = fetch_gene_weights(sp.genes.values(), args['weight'])
-			for g, w in zip(sp.genes.values(), weights):
-				g.weight = w
-		for ss in sp.subspecies.values():
-			if ss.num_genes > 0:
-				weights = fetch_gene_weights(ss.genes.values(), args['weight'])
-				for g, w in zip(ss.genes.values(), weights):
-					g.weight = w
-
+	print("  total species: %s" % len(db))
+	print("  total genes: %s" % sum([len(sp.genes) for sp in db.values()]))
 	return db
 
-def fetch_gene_weights(genes, method):
-	if method == 'score':
-		values = [max(g.score, 0.0) for g in genes]
-	elif method == 'intra_freq':
-		values = [g.intra_freq for g in genes]
-	elif method == 'inter_freq':
-		values = [100.0 - g.inter_freq for g in genes]
-	else:
-		values = [1.0 for g in genes]
-	return [v/sum(values) for v in values] if sum(values) > 0 else [1.0/len(genes) for g in genes]
+def weight_genes():
+
+	for species in db.values():
+
+		genes = species.genes.values()
+
+		if len(genes) == 0:
+			continue
+		
+		intra = [g.intra_freq for g in genes]
+		intra = [_/sum(intra) for _ in intra]
+		
+		inter = [g.inter_freq for g in genes]
+		if sum(inter) > 0:
+			inter = [max(inter) - i for i in inter]
+			inter = [i/sum(inter) for i in inter]
+		else:
+			inter = [1.0/len(genes) for g in genes]
+		
+		weights = []
+		for gene, intra_i, inter_i in zip(genes, intra, inter):
+			gene.weight = (intra_i+inter_i)/2.0
+
 
 def map_reads(args):
 	import subprocess
 	
-	# remove existing output
-	if os.path.exists('%s/mapped_reads.m8' % args['outdir']):
-		os.remove('%s/mapped_reads.m8' % args['outdir'])
-	if os.path.exists('%s/mapped_reads.m8.gz' % args['outdir']):
-		os.remove('%s/mapped_reads.m8.gz' % args['outdir'])
+	# check output
+	out = '%s/mapped_reads.m8' % args['outdir']
+	if os.path.exists(out):
+		if args['check'] :
+			print("  nothing to do")
+			return
+		else:
+			os.remove(out)
 	
 	# build command
 	command = 'python %s/stream_seqs.py' % os.path.dirname(os.path.abspath(sys.argv[0]))
@@ -187,11 +186,11 @@ def map_reads(args):
 	command += ' -query /dev/stdin'
 	command += ' -max_target_seqs 1'
 	command += ' -num_alignments 1'
-	command += ' -db %s' % args['db']
+	command += ' -db %s/markers.ffn' % args['db']
 	command += ' -outfmt 6'
 	command += ' -num_threads %s' % args['threads']
 	command += ' -evalue 1e-3'
-	command += ' -out %s/mapped_reads.m8' % args['outdir']
+	command += ' -out %s' % out
 
 	# run command
 	if args['verbose']: print("RUNNING: %s" % command)
@@ -202,13 +201,6 @@ def map_reads(args):
 		sys.exit(err_message)
 	if args['verbose'] and len(out) > 0: print("hsblastn stdout: %s" % out)
 	if args['verbose'] and len(err) > 0: print("hsblastn stderr: %s" % err)
-
-	# compress output
-	if args['verbose']: print("RUNNING: gzip %s/mapped_reads.m8" % args['outdir'])
-	process = subprocess.Popen('gzip %s/mapped_reads.m8' % args['outdir'], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	out, err = process.communicate()
-	if args['verbose'] and len(out) > 0: print("gzip out: %s" % out)
-	if args['verbose'] and len(err) > 0: print("gzip err: %s" % err)
 
 def keep_m8_aln(aln, min_pid, min_aln_cov):
 	query_len = aln['query'].split('_')[-1]
@@ -222,59 +214,50 @@ def keep_m8_aln(aln, min_pid, min_aln_cov):
 		return True
 
 def parse_hsblastn(inpath):
-	import gzip
 	formats = [str,str,float,int,float,float,float,float,float,float,float,float]
 	fields = ['query','target','pid','aln','mis','gaps','qstart','qend','tstart','tend','evalue','score']
-	for line in gzip.open(inpath):
+	for line in open(inpath):
 		values = line.rstrip().split()
 		yield dict([(field, format(value)) for field, format, value in zip(fields, formats, values)])
 
-def count_mapped_reads(args):
+def count_reads(args):
 	last_query = None
-	alnfile = parse_hsblastn('%s/mapped_reads.m8.gz' % args['outdir'])
-	for index, aln in enumerate(alnfile):
+	file = parse_hsblastn('%s/mapped_reads.m8' % args['outdir'])
+	for index, aln in enumerate(file):
 		
-		# only process each read 1x
+		# skip secondary alignments
+		# TO DO: what about paired-end reads?
 		if aln['query'] == last_query:
 			continue
-		else:
-			last_query = aln['query']
+		last_query = aln['query']
 	
-		# filter alignments
+		# filter alignments that don't meet cutoffs
 		if not keep_m8_aln(aln, args['mapid'], args['aln_cov']):
 			continue
 
-		type, taxon_id = aln['target'].split('|')[0].split('_', 1)
-		
-		if type == 'subspecies':
-			spid = taxon_id.split('_')[0]
-			ssid = taxon_id
-			taxon = db[spid].subspecies[ssid]
-		else:
-			spid = taxon_id
-			taxon = db[spid]
-		
-		if aln['target'] not in taxon.genes:
+		# skip species and/or genes that were excluded from the db
+		species_id, gene_id = aln['target'].split('|')
+		if species_id not in db or gene_id not in db[species_id].genes:
 			continue
-		else:
-			gene = taxon.genes[aln['target']]
-
+		
+		# count alignment
+		gene = db[species_id].genes[gene_id]
 		gene.reads += 1
 		gene.bases += aln['aln']
 		gene.depth += 1.0*aln['aln']/gene.length
 
-def quantify_species():
+def quantify_abundance():
 	total_depth = 0
-	for spid, sp in db.items():
+	for id, sp in db.items():
 		genes = sp.genes.values()
-		sp.depth = sum([g.weight * g.depth for g in genes])
+		sp.depth = sum([g.depth * g.weight for g in genes])
 		sp.reads = sum([g.reads for g in genes])
 		sp.fract = sum([g.weight for g in genes if g.reads > 0])
 		total_depth += sp.depth
-	for spid, sp in db.items():
+	for id, sp in db.items():
 		sp.abun = 100*sp.depth/total_depth if total_depth > 0 else 0.0
 
-def write_species_profile():
+def write_profile():
 	out = open('%s/species_profile.tsv' % args['outdir'], 'w')
 	fields = ['species_id', 'length', 'genes', 'fract', 'reads', 'depth', 'abund']
 	out.write('\t'.join(fields)+'\n')
@@ -290,104 +273,52 @@ def write_species_profile():
 		out.write('\t'.join([str(_) for _ in row])+'\n')
 	out.close()
 
-def quantify_subspecies():
-	for spid, sp in db.items():
-		if len(sp.subspecies) > 0:
-			total_depth = 0
-			for ss in sp.subspecies.values():
-				genes = ss.genes.values()
-				ss.depth = sum([g.depth * g.weight for g in genes])
-				ss.reads = sum([g.reads for g in genes])
-				ss.fract = sum([g.weight for g in genes if g.reads > 0])
-				total_depth += ss.depth
-			for ss in sp.subspecies.values():
-				ss.abun = sp.abun*ss.depth/total_depth if total_depth > 0 else 0.0
-
-def write_subspecies_profile():
-	out = open('%s/subspecies_profile.tsv' % args['outdir'], 'w')
-	fields = ['taxon_id', 'length', 'genes', 'fract', 'reads', 'depth', 'abund']
-	out.write('\t'.join(fields)+'\n')
-	for spid, sp in db.items():
-		if len(sp.subspecies) > 0:
-			for ssid, ss in sp.subspecies.items():
-				row = []
-				row.append(ssid)
-				row.append('%s' % ss.length)
-				row.append('%s' % ss.num_genes)
-				row.append('%s' % ss.fract)
-				row.append('%s' % ss.reads)
-				row.append('%s' % ss.depth)
-				row.append(ss.abun)
-				out.write('\t'.join([str(_) for _ in row])+'\n')
-	out.close()
-
-def write_taxon_profile():
-	out = open('%s/taxon_profile.tsv' % args['outdir'], 'w')
-	fields = ['taxon_id', 'length', 'genes', 'fract', 'reads', 'depth', 'abund']
-	out.write('\t'.join(fields)+'\n')
-	for spid, sp in db.items():
-		if len(sp.subspecies) > 0:
-			for ssid, ss in sp.subspecies.items():
-				row = []
-				row.append(ssid)
-				row.append('%s' % ss.length)
-				row.append('%s' % ss.num_genes)
-				row.append('%s' % ss.fract_covered)
-				row.append('%s' % ss.reads)
-				row.append('%s' % ss.depth)
-				row.append(ss.abun)
-				out.write('\t'.join([str(_) for _ in row])+'\n')
-		else:
-			row = []
-			row.append(spid)
-			row.append(sp.length)
-			row.append(sp.num_genes)
-			row.append(sp.fract_covered)
-			row.append(sp.reads)
-			row.append(sp.depth)
-			row.append(sp.abun)
-			out.write('\t'.join([str(_) for _ in row])+'\n')
-	out.close()
-
+def log_time(program_start, module_start):
+	current_time = time.time()
+	program_time = round(current_time - program_start, 2)
+	module_time = round(current_time - module_start, 2)
+	peak_ram = round(utility.max_mem_usage(), 2)
+	print("  module: %s seconds, program: %s seconds, peak RAM: %s GB" % (module_time, program_time, peak_ram))
+	
 if __name__ == "__main__":
 
 	import time
-	start = time.time()
+	program_start = time.time()
 	
 	args = parse_arguments()
 
 	import utility
 	check_args(args) # --> make sure bowtie2 and/or hsblastn is on PATH
 
-	# initialize database object
-	if args['verbose']:
-		print("\n## Initializing db")
+	print("\n## Initializing database")
+	module_start = time.time()
 	db = init_db_info()
+	log_time(program_start, module_start)
+	
+	print("\n## Assigning gene weights")
+	module_start = time.time()
+	weight_genes()
+	log_time(program_start, module_start)
 
-	# map reads
-	if args['verbose']:
-		print("\n## Mapping reads")
-	if not (args['skip'] and
-			os.path.exists('%s/mapped_reads.m8.gz' % args['outdir'])):
-		map_reads(args)
+	print("\n## Aligning reads")
+	module_start = time.time()
+	map_reads(args)
+	log_time(program_start, module_start)
+	
+	print("\n## Counting mapped reads")
+	module_start = time.time()
+	count_reads(args)
+	log_time(program_start, module_start)
 
-	# count reads
-	if args['verbose']:
-		print("\n## Counting mapped reads")
-	count_mapped_reads(args)
+	print("\n## Estimating abundance")
+	module_start = time.time()
+	quantify_abundance()
+	log_time(program_start, module_start)
 
-	# summarize mapping
-	quantify_species()
-	quantify_subspecies()
-
-	# write results
-	write_species_profile()
-	write_subspecies_profile()
-
-	if args['verbose']:
-		print("\n## Pipeline complete")
-		print("Time: %s seconds" % round(time.time()-start,2))
-		print("RAM: %s GB" % utility.max_mem_usage())
+	print("\n## Writing species profile")
+	module_start = time.time()
+	write_profile()
+	log_time(program_start, module_start)
 
 
 
