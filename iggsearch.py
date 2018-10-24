@@ -19,7 +19,6 @@ class Gene:
 		self.reads = 0
 		self.bases = 0
 		self.depth = 0
-		self.weight = None
 
 def parse_arguments():
 	""" Parse command line arguments """
@@ -30,6 +29,7 @@ def parse_arguments():
 		description="IGGsearch: metagenome profiling of lineages from the Integrated Human Gut Genomes Database (IGGdb)"
 	)
 	parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', default=False)
+
 	io = parser.add_argument_group('Input/output options')
 	io.add_argument('-o', dest='outdir', type=str, required=True,
 		help="""Path to directory to store results.
@@ -42,37 +42,74 @@ Use comma ',' to separate multiple input files""")
 	io.add_argument('-2', type=str, dest='m2',
 		help="""FASTA/FASTQ file containing 2nd mate if using paired-end reads.""")
 	io.add_argument('-d', type=str, dest='db', default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None,
-		help="""Path to reference database
-By default, the MAG_DB environmental variable is used""")
+		help="""Path to reference database. By default, the IGG_DB environmental variable is used""")
+		
+	stats = parser.add_argument_group('Quantification options')
+	stats.add_argument('--presabs_cutoff', type=float, default=0.5,
+		help="""Cutoff for determining species presence/absence. By default a species is called present if at least 50% of its marker genes recruit at least 1 mapped read (default=0.5)""")
+	stats.add_argument('--min_intra', type=float, default=0.0,
+		help="Exclude database genes found in fewer than <min_intra_freq> of reference genomes within species (default=0, range=[0,100])")
+	stats.add_argument('--max_inter', type=float, default=100.0,
+		help="Exclude database genes found in greater than <max_inter_freq> of reference genomes within species (default=1.0, range=[0,1])")
 
-	io.add_argument('-w', dest='weight', choices=['score', 'intra_freq', 'inter_freq', 'none'], default=None,
-		help="weight genes based on their score, intra-clade frequency, or inter-clade frequency")
-	io.add_argument('--min_intra_freq', type=float, default=0.0)
-	io.add_argument('--max_inter_freq', type=float, default=100.0)
-	
-	io.add_argument('--check', action='store_true', default=False,
-		help=argparse.SUPPRESS)
-	io.add_argument('--test', action='store_true', default=False,
-		help=argparse.SUPPRESS)
-	io.add_argument('--max_genes', type=int, help=argparse.SUPPRESS)
-
-	align = parser.add_argument_group('Read alignment options')
-	align.add_argument('-n', type=int, dest='max_reads',
+	speed = parser.add_argument_group('Pipeline speed')
+	speed.add_argument('-n', type=int, dest='max_reads',
 		help='# reads to use from input file(s) (use all)')
-	align.add_argument('-t', dest='threads', default=1,
+	speed.add_argument('-t', dest='threads', default=1,
 		help='Number of threads to use (1)')
+	speed.add_argument('--check', action='store_true', default=False, help=argparse.SUPPRESS)
+	speed.add_argument('--test', action='store_true', default=False, help=argparse.SUPPRESS)
+	speed.add_argument('--max_genes', type=int, help=argparse.SUPPRESS)
+
 	map = parser.add_argument_group('Read filtering options')
 	map.add_argument('--mapid', type=float, metavar='FLOAT',
 		default=95.0, help='Discard reads with alignment identity < MAPID (95.0)')
 	map.add_argument('--aln_cov', type=float, metavar='FLOAT',
 		default=0.75, help='Discard reads with alignment coverage < ALN_COV (0.75)')
+	map.add_argument('--readq', type=float, metavar='FLOAT',
+		default=20.0, help='Minimum average-base-quality per read (20.0)')
+	map.add_argument('--mapq', type=float, metavar='FLOAT',
+		default=0, help='Minimum map quality score per read (0)')
+		
 	args = vars(parser.parse_args())
 	return args
 
+def which(program):
+	""" Mimics unix 'which' function """
+	def is_exe(fpath):
+		return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+	for path in os.environ["PATH"].split(os.pathsep):
+		path = path.strip('"')
+		exe_file = os.path.join(path, program)
+		if is_exe(exe_file):
+			return True
+	return False
+
+def check_database(args):
+	if args['db'] is None:
+		error = "\nError: No reference database specified\n"
+		error += "Use the flag -d to specify a database,\n"
+		error += "Or set the IGG_DB environmental variable: export IGG_DB=/path/to/igg_db\n"
+		sys.exit(error)
+	if not os.path.exists(args['db']):
+		error = "\nError: Specified reference database does not exist: %s" % args['db']
+		error += "\nCheck that you've entered the path correctly and the database exists\n"
+		sys.exit(error)
+	for file in []:
+		path = '%s/%s' % (args['db'], file)
+		if not os.path.exists(path):
+			error = "\nError: Could not locate required database file: %s\n" % path
+			sys.exit(error)
+
 def check_args(args):
 
+	# check executables
+	for exe in ['bowtie2', 'samtools']:
+		if not which(exe):
+			sys.exit("\nError: required program '%s' not executable or not found on $PATH\n" % exe)
+
 	# check database
-	utility.check_database(args)
+	check_database(args)
 	
 	if args['test']:
 		args['max_reads'] = 1000
@@ -103,6 +140,7 @@ def check_args(args):
 
 def init_db_info():
 	
+	num_skipped = 0
 	db = {}
 	file = open('%s/markers.tsv' % args['db'])
 	next(file)
@@ -113,22 +151,23 @@ def init_db_info():
 		
 		# parse line
 		row = line.rstrip().split('\t')
-		species_id, cluster_id, genome_id, gene_id, rank, length, missing, freq, num_hits, sum_hits, max_hits, all_hits = row
+		species_id, cluster_id, length, missing, intra_freq, inter_count, inter_max, inter_sum, inter_freqs = row
+		
+		# filter genes
+		if (float(intra_freq) < args['min_intra'] or float(inter_sum) > args['max_inter']):
+			num_skipped += 1
+			continue
+		
+		# TO DO: filter species by genome quality?
 		
 		# init objects
 		if species_id not in db:
 			db[species_id] = Species()
-
-		# TO DO: filter genes
-		# ALSO: consider filtering species
-		pass
-
+		
 		# store gene
 		# TO DO: add more info
 		gene = Gene()
 		gene.length = int(length)
-		gene.intra_freq = float(freq)
-		gene.inter_freq = float(sum_hits)
 		db[species_id].genes[cluster_id] = gene
 
 	# compute some summary statistics
@@ -139,127 +178,108 @@ def init_db_info():
 
 	print("  total species: %s" % len(db))
 	print("  total genes: %s" % sum([len(sp.genes) for sp in db.values()]))
+	print("  excluded genes: %s" % num_skipped)
+	
 	return db
 
-def weight_genes():
 
-	for species in db.values():
-
-		genes = species.genes.values()
-
-		if len(genes) == 0:
-			continue
-		
-		intra = [g.intra_freq for g in genes]
-		intra = [_/sum(intra) for _ in intra]
-		
-		inter = [g.inter_freq for g in genes]
-		if sum(inter) > 0:
-			inter = [max(inter) - i for i in inter]
-			inter = [i/sum(inter) for i in inter]
-		else:
-			inter = [1.0/len(genes) for g in genes]
-		
-		weights = []
-		for gene, intra_i, inter_i in zip(genes, intra, inter):
-			gene.weight = (intra_i+inter_i)/2.0
-
-
-def map_reads(args):
+def map_reads_bt2(args):
 	import subprocess
 	
-	# check output
-	out = '%s/mapped_reads.m8' % args['outdir']
-	if os.path.exists(out):
-		if args['check'] :
-			print("  nothing to do")
-			return
-		else:
-			os.remove(out)
+	out = '%s/mapped_reads.bam' % args['outdir']
 	
-	# build command
-	command = 'python %s/stream_seqs.py' % os.path.dirname(os.path.abspath(sys.argv[0]))
-	command += ' -1 %s' % args['m1'] # fasta/fastq
-	if args['m2']: command += ' -2 %s' % args['m2'] # mate
-	if args['max_reads']: command += ' -n %s' % args['max_reads'] # number of reads
-	command += ' | hs-blastn align'
-	command += ' -query /dev/stdin'
-	command += ' -max_target_seqs 1'
-	command += ' -num_alignments 1'
-	command += ' -db %s/markers.ffn' % args['db']
-	command += ' -outfmt 6'
-	command += ' -num_threads %s' % args['threads']
-	command += ' -evalue 1e-3'
-	command += ' -out %s' % out
+	# Run bowtie2
+	command = 'bowtie2 --no-unal '
+	command += '-x %s/markers ' % args['db']
+	if args['max_reads']: command += '-u %s ' % args['max_reads']
+	command += '--threads %s ' % args['threads']
+	if args['m2']:
+		command += '-1 %s -2 %s ' % (args['m1'], args['m2'])
+	else:
+		command += '-U %s ' % args['m1']
+	# Output sorted bam file
+	command += '| samtools view -b - --threads %s ' % args['threads']
+	command += '| samtools sort - --threads %s ' % args['threads']
+	command += '-O BAM > %s ' % out
 
 	# run command
-	if args['verbose']: print("RUNNING: %s" % command)
+	print("  running: %s" % command)
 	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	out, err = process.communicate()
 	if process.returncode != 0:
 		err_message = "\nError encountered executing:\n%s\n\nError message:\n%s\n" % (command, err)
 		sys.exit(err_message)
-	if args['verbose'] and len(out) > 0: print("hsblastn stdout: %s" % out)
-	if args['verbose'] and len(err) > 0: print("hsblastn stderr: %s" % err)
 
-def keep_m8_aln(aln, min_pid, min_aln_cov):
-	query_len = aln['query'].split('_')[-1]
+def keep_aln(aln, min_pid, min_readq, min_mapq, min_aln_cov):
+	align_len = len(aln.query_alignment_sequence)
+	query_len = aln.query_length
 	# min pid
-	if aln['pid'] < min_pid:
+	if 100*(align_len-dict(aln.tags)['NM'])/float(align_len) < min_pid:
+		return False
+	# min read quality
+	elif np.mean(aln.query_qualities) < min_readq:
+		return False
+	# min map quality
+	elif aln.mapping_quality < min_mapq:
 		return False
 	# min aln cov
-	elif aln['aln']/float(query_len) < min_aln_cov:
+	elif align_len/float(query_len)  < min_aln_cov:
 		return False
 	else:
 		return True
 
-def parse_hsblastn(inpath):
-	formats = [str,str,float,int,float,float,float,float,float,float,float,float]
-	fields = ['query','target','pid','aln','mis','gaps','qstart','qend','tstart','tend','evalue','score']
-	for line in open(inpath):
-		values = line.rstrip().split()
-		yield dict([(field, format(value)) for field, format, value in zip(fields, formats, values)])
-
-def count_reads(args):
-	last_query = None
-	file = parse_hsblastn('%s/mapped_reads.m8' % args['outdir'])
-	for index, aln in enumerate(file):
-		
-		# skip secondary alignments
-		# TO DO: what about paired-end reads?
-		if aln['query'] == last_query:
-			continue
-		last_query = aln['query']
+def count_reads_bt2(args):
+	aligned = 0
+	mapped = 0
+	import pysam
+	bam_path =  '%s/mapped_reads.bam' % args['outdir']
+	bamfile = pysam.AlignmentFile(bam_path, "r")
+	for index, aln in enumerate(bamfile.fetch(until_eof = True)):
 	
-		# filter alignments that don't meet cutoffs
-		if not keep_m8_aln(aln, args['mapid'], args['aln_cov']):
-			continue
-
 		# skip species and/or genes that were excluded from the db
-		species_id, gene_id = aln['target'].split('|')
+		species_id, gene_id = bamfile.getrname(aln.reference_id).split('|')
 		if species_id not in db or gene_id not in db[species_id].genes:
 			continue
 		
+		# filter alignments
+		aligned += 1
+		args['readq'] = 0
+		args['mapq'] = 0
+		if not keep_aln(aln, args['mapid'], args['readq'], args['mapq'], args['aln_cov']):
+			continue
+		mapped += 1
+		
 		# count alignment
+		aln_len = len(aln.query_alignment_sequence)
 		gene = db[species_id].genes[gene_id]
 		gene.reads += 1
-		gene.bases += aln['aln']
-		gene.depth += 1.0*aln['aln']/gene.length
+		gene.bases += aln_len
+		gene.depth += 1.0*aln_len/gene.length
+	
+	print("  total aligned reads: %s" % aligned)
+	print("  aligned reads after filtering: %s" % mapped)
 
 def quantify_abundance():
 	total_depth = 0
 	for id, sp in db.items():
 		genes = sp.genes.values()
-		sp.depth = sum([g.depth * g.weight for g in genes])
+		sp.depth = sum([g.depth for g in genes])
 		sp.reads = sum([g.reads for g in genes])
-		sp.fract = sum([g.weight for g in genes if g.reads > 0])
+		sp.fract = np.mean([1 if g.reads > 0 else 0 for g in genes])
 		total_depth += sp.depth
 	for id, sp in db.items():
 		sp.abun = 100*sp.depth/total_depth if total_depth > 0 else 0.0
+		sp.pres = 1 if sp.fract >= args['presabs_cutoff'] else 0
+	total_reads = sum([sp.reads for sp in db.values()])
+	print("  mapped reads: %s" % total_reads)
+	total_species = sum([sp.pres for sp in db.values()])
+	print("  detected species (using presabs_cutoff): %s" % total_species)
+	total_species = sum([1 for sp in db.values() if sp.abun > 0])
+	print("  detected species (with non-zero abundance): %s" % total_species)
 
 def write_profile():
 	out = open('%s/species_profile.tsv' % args['outdir'], 'w')
-	fields = ['species_id', 'length', 'genes', 'fract', 'reads', 'depth', 'abund']
+	fields = ['species_id', 'length', 'genes', 'fract', 'reads', 'depth', 'abund', 'present']
 	out.write('\t'.join(fields)+'\n')
 	for spid, sp in db.items():
 		row = []
@@ -270,6 +290,7 @@ def write_profile():
 		row.append(sp.reads)
 		row.append(sp.depth)
 		row.append(sp.abun)
+		row.append(sp.pres)
 		out.write('\t'.join([str(_) for _ in row])+'\n')
 	out.close()
 
@@ -282,32 +303,26 @@ def log_time(program_start, module_start):
 	
 if __name__ == "__main__":
 
-	import time
+	import time, utility
 	program_start = time.time()
 	
 	args = parse_arguments()
 
-	import utility
-	check_args(args) # --> make sure bowtie2 and/or hsblastn is on PATH
-
+	check_args(args)
+	
 	print("\n## Initializing database")
 	module_start = time.time()
 	db = init_db_info()
 	log_time(program_start, module_start)
 	
-	print("\n## Assigning gene weights")
-	module_start = time.time()
-	weight_genes()
-	log_time(program_start, module_start)
-
 	print("\n## Aligning reads")
 	module_start = time.time()
-	map_reads(args)
+	map_reads_bt2(args)
 	log_time(program_start, module_start)
-	
+
 	print("\n## Counting mapped reads")
 	module_start = time.time()
-	count_reads(args)
+	count_reads_bt2(args)
 	log_time(program_start, module_start)
 
 	print("\n## Estimating abundance")
