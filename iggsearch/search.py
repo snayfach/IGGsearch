@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-import os, sys, subprocess as sp, numpy as np, time, utility, csv
-
 class Species:
 	def __init__(self):
 		self.genes = {}
@@ -22,10 +20,19 @@ class Gene:
 		self.intra_freq = None
 		self.inter_freq = None
 
+def import_libraries():
+	import importlib
+	modnames = ["os", "sys", "subprocess", "numpy", "time", "pysam", "csv", "time", "argparse", "iggsearch", "iggsearch.utility"]
+	for lib in modnames:
+		errors = []
+		try:
+			globals()[lib] = importlib.import_module(lib)
+		except:
+			errors.append(lib)
+	if len(errors) > 0:
+		sys.exit("\nCould not import the following libraries: %s \n" % str(errors))
+
 def parse_arguments():
-	""" Parse command line arguments """
-	import argparse
-	
 	parser = argparse.ArgumentParser(
 		formatter_class=argparse.RawTextHelpFormatter,
 		usage=argparse.SUPPRESS,
@@ -43,7 +50,7 @@ Can be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2)
 Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq""")
 	io.add_argument('-2', type=str, dest='m2',
 		help="""FASTA/FASTQ file containing 2nd mate if using paired-end reads.""")
-	io.add_argument('-d', type=str, dest='db', default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None,
+	io.add_argument('-d', type=str, dest='db_dir', default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None,
 		help="""Path to reference database. By default, the IGG_DB environmental variable is used""")
 	io.add_argument('--all', action='store_true', default=False,
 		help="""Output results for all species, including those that were not detected (False)""")
@@ -52,7 +59,6 @@ Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq""")
 Useful with combined with '--all' to enforce same ordering of species across multiple output files""")
 	io.add_argument('--hq-only', action='store_true', default=False,
 		help="""Only report results for species with at least 1 high-quality genome (False)""")
-
 	speed = parser.add_argument_group('pipeline speed')
 	speed.add_argument('-n', type=int, dest='max_reads',
 		help='# reads to use from input file(s) (use all)')
@@ -60,10 +66,9 @@ Useful with combined with '--all' to enforce same ordering of species across mul
 		help='Number of threads to use (1)')
 	speed.add_argument('--no-align', action='store_true', default=False,
 		help="""Skip read alignment if <outdir>/mapped_reads.bam already exists (False)""")
-	speed.add_argument('--check', action='store_true', default=False, help=argparse.SUPPRESS)
-	speed.add_argument('--test', action='store_true', default=False, help=argparse.SUPPRESS)
+	speed.add_argument('--test', action='store_true', default=False,
+		help="""Perform a quick testing run (False)""")
 	speed.add_argument('--max_genes', type=int, help=argparse.SUPPRESS)
-
 	map = parser.add_argument_group('alignment/quality control')
 	map.add_argument('--mapid', type=float, metavar='FLOAT',
 		default=95.0, help='Discard reads with alignment identity < MAPID (95.0)')
@@ -79,47 +84,39 @@ defined at the percent of a species' marker genes with >=1 mapped read.
 Useful for eliminating spurious hits (15)""")
 	map.add_argument('--min-markers', type=int, default=None,
 		help="""Exclude species with fewer than <min-markers> (0)""")
-
 	args = vars(parser.parse_args())
-	
-	args['file_type'] = utility.auto_detect_file_type(args['m1'].split(',')[0])
-	
+	args['file_type'] = iggsearch.utility.auto_detect_file_type(args['m1'].split(',')[0])
+	check_args(args)
 	return args
 
-def check_database(args):
-	if args['db'] is None:
+def check_args(args):
+	# check database
+	if args['db_dir'] is None:
 		error = "\nError: No reference database specified\n"
 		error += "Use the flag -d to specify a database,\n"
 		error += "Or set the IGG_DB environmental variable: export IGG_DB=/path/to/igg_db\n"
 		sys.exit(error)
-	if not os.path.exists(os.path.dirname(args['db'])):
-		error = "\nError: Specified reference database does not exist: %s" % os.path.dirname(args['db'])
+	args['db_base'] = '%s/%s' % (args['db_dir'], args['db_dir'].split('/')[-1])
+	if not os.path.exists(args['db_dir']):
+		error = "\nError: Specified reference database does not exist: %s" % os.path.dirname(args['db_dir'])
 		sys.exit(error)
 	for file in []:
-		path = '%s/%s' % (args['db'], file)
+		path = '%s/%s' % (args['db_dir'], file)
 		if not os.path.exists(path):
 			error = "\nError: Could not locate required database file: %s\n" % path
 			sys.exit(error)
-
-def check_args(args):
-
 	# check executables
 	for exe in ['bowtie2', 'samtools']:
-		if not utility.which(exe):
+		if not iggsearch.utility.which(exe):
 			sys.exit("\nError: required program '%s' not executable or not found on $PATH\n" % exe)
-
-	# check database
-	check_database(args)
-	
 	if args['test']:
 		args['max_reads'] = 1000
 		args['max_genes'] = 100000
-		args['check'] = True
-	
+		args['no_align'] = True
+		sys.stderr.write("\nWarning: this is a quick test run; results should not be interpreted\n")
 	# create output directory
 	if not os.path.isdir(args['outdir']):
 		os.makedirs(args['outdir'])
-	
 	# check input file paths
 	for arg in ['m1', 'm2']:
 		if not args[arg]:
@@ -127,11 +124,9 @@ def check_args(args):
 		for file in args[arg].split(','):
 			if not os.path.isfile(file):
 				sys.exit("\nError: Input file does not exist: '%s'\n" % file)
-
 	# input options
 	if args['m2'] and not args['m1']:
 		sys.exit("\nError: Must specify -1 and -2 if aligning paired end reads\n")
-
 	# sanity check input values
 	if args['mapid'] < 1 or args['mapid'] > 100:
 		sys.exit("\nError: MAPID must be between 1 and 100\n")
@@ -143,7 +138,7 @@ def init_db_info(args):
 	db = {}
 
 	# initialize species
-	for r in csv.DictReader(open('%s.species' % args['db']), delimiter='\t'):
+	for r in csv.DictReader(open('%s.species' % args['db_base']), delimiter='\t'):
 		if args['hq_only'] and r['is_high_quality']=='No':
 			continue
 		if args['min_markers'] and int(r['marker_count']) < args['min_markers']:
@@ -156,7 +151,7 @@ def init_db_info(args):
 		db[r['species_alt_id']] = sp
 	
 	# markers
-	for index, r in enumerate(csv.DictReader(open('%s.markers' % args['db']), delimiter='\t')):
+	for index, r in enumerate(csv.DictReader(open('%s.markers' % args['db_base']), delimiter='\t')):
 		if args['max_genes'] and index == args['max_genes']: break
 		if r['species_alt_id'] not in db: continue
 		gene = Gene()
@@ -176,7 +171,6 @@ def init_db_info(args):
 
 
 def map_reads_bt2(args):
-	import subprocess
 	
 	out = '%s/mapped_reads.bam' % args['outdir']
 	if os.path.exists(out) and args['no_align']:
@@ -186,7 +180,7 @@ def map_reads_bt2(args):
 	# Run bowtie2
 	command = 'bowtie2 --no-unal '
 	command += '-f ' if args['file_type'] == 'fasta' else '-q '
-	command += '-x %s ' % args['db']
+	command += '-x %s ' % args['db_base']
 	if args['max_reads']: command += '-u %s ' % args['max_reads']
 	command += '--threads %s ' % args['threads']
 	if args['m2']:
@@ -201,7 +195,7 @@ def map_reads_bt2(args):
 	# run command
 	print("  running: %s" % command)
 	process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	out, err = process.communicate()
+	out, err = [str(_) for _ in process.communicate()]
 	if process.returncode != 0:
 		err_message = "\nError encountered executing:\n%s\n\nError message:\n%s\n" % (command, err)
 		sys.exit(err_message)
@@ -217,7 +211,7 @@ def keep_aln(aln, min_pid, min_readq, min_mapq, min_aln_cov):
 	if 100*(align_len-dict(aln.tags)['NM'])/float(align_len) < min_pid:
 		return False
 	# min read quality
-	elif np.mean(aln.query_qualities) < min_readq:
+	elif numpy.mean(aln.query_qualities) < min_readq:
 		return False
 	# min map quality
 	elif aln.mapping_quality < min_mapq:
@@ -231,7 +225,6 @@ def keep_aln(aln, min_pid, min_readq, min_mapq, min_aln_cov):
 def count_reads_bt2(args, db):
 	aligned = 0
 	mapped = 0
-	import pysam
 	bam_path =  '%s/mapped_reads.bam' % args['outdir']
 	bamfile = pysam.AlignmentFile(bam_path, "r")
 	for index, aln in enumerate(bamfile.fetch(until_eof = True)):
@@ -267,7 +260,7 @@ def quantify_abundance(args, db):
 		if sp.length > 0:
 			sp.depth = sum([g.bases for g in genes])/float(sp.length)
 			sp.reads = sum([g.reads for g in genes])
-			sp.percent = 100*np.mean([1 if g.reads > 0 else 0 for g in genes])
+			sp.percent = 100*numpy.mean([1 if g.reads > 0 else 0 for g in genes])
 			total_depth += sp.depth
 	for id, sp in db.items():
 		sp.pres = 1 if sp.percent >= args['pres'] else 0
@@ -283,7 +276,6 @@ def quantify_abundance(args, db):
 def write_profile(args, db):
 	out = open('%s/species_profile.tsv' % args['outdir'], 'w')
 	fields = ['species_id', 'species_name',
-	          'gtdb_taxonomy', 'otu_taxonomy',
 	          'marker_length', 'marker_count',
 			  'percent_markers_detected', 'total_mapped_reads', 'avg_read_depth',
 	          'species_abund', 'species_presence']
@@ -300,8 +292,6 @@ def write_profile(args, db):
 		row = []
 		row.append(db[id].id)
 		row.append(db[id].name)
-		row.append(db[id].gtdb)
-		row.append(db[id].otus)
 		row.append(db[id].length)
 		row.append(db[id].num_genes)
 		row.append(db[id].percent)
@@ -311,40 +301,37 @@ def write_profile(args, db):
 		row.append(db[id].pres)
 		out.write('\t'.join([str(_) for _ in row])+'\n')
 	out.close()
-	
+
 def main():
 
-	import time, utility
+	import_libraries()
 	program_start = time.time()
-	
 	args = parse_arguments()
-
-	check_args(args)
 	
 	print("\n## Initializing database")
 	module_start = time.time()
 	db = init_db_info(args)
-	utility.log_time(program_start, module_start)
+	iggsearch.utility.log_time(program_start, module_start)
 	
 	print("\n## Aligning reads")
 	module_start = time.time()
 	map_reads_bt2(args)
-	utility.log_time(program_start, module_start)
+	iggsearch.utility.log_time(program_start, module_start)
 
 	print("\n## Counting mapped reads")
 	module_start = time.time()
 	count_reads_bt2(args, db)
-	utility.log_time(program_start, module_start)
+	iggsearch.utility.log_time(program_start, module_start)
 
 	print("\n## Estimating abundance")
 	module_start = time.time()
 	quantify_abundance(args, db)
-	utility.log_time(program_start, module_start)
+	iggsearch.utility.log_time(program_start, module_start)
 
 	print("\n## Writing species profile")
 	module_start = time.time()
 	write_profile(args, db)
-	utility.log_time(program_start, module_start)
+	iggsearch.utility.log_time(program_start, module_start)
 
 
 
