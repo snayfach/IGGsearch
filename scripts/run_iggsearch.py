@@ -5,7 +5,7 @@ import os, sys, subprocess as sp, numpy as np, time, shutil
 def get_program():
 	""" Get program specified by user (species, genes, or snps) """
 	if len(sys.argv) == 1 or sys.argv[1] in ['-h', '--help']:
-		print('Description: Estimate species abundance and intra-species genomic variation from an individual metagenome')
+		print('Description: Metagenomic species profiling with enhanced coverage of the human gut microbiome')
 		print('')
 		print('Usage: iggsearch.py <command> [options]')
 		print('')

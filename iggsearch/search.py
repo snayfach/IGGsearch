@@ -40,35 +40,31 @@ def parse_arguments():
 	)
 	parser.add_argument('program', help=argparse.SUPPRESS)
 	io = parser.add_argument_group('input/output')
-	io.add_argument('-o', dest='outdir', type=str, required=True,
-		help="""Path to directory to store results.
-Directory name should correspond to sample identifier""")
-	io.add_argument('-1', type=str, dest='m1', required=True,
+	io.add_argument('--outdir', dest='outdir', type=str, required=True, metavar='PATH',
+		help="""Directory to store results.
+Name should correspond to unique identifier for your sample""")
+	io.add_argument('--m1', type=str, dest='m1', required=True, metavar='PATH',
 		help="""FASTA/FASTQ file containing 1st mate if using paired-end reads.
 Otherwise FASTA/FASTQ containing unpaired reads.
 Can be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2)
 Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq""")
-	io.add_argument('-2', type=str, dest='m2',
+	io.add_argument('--m2', type=str, dest='m2', metavar='PATH',
 		help="""FASTA/FASTQ file containing 2nd mate if using paired-end reads.""")
-	io.add_argument('-d', type=str, dest='db_dir', default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None,
+	io.add_argument('--db_dir', type=str, dest='db_dir', default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None, metavar='PATH',
 		help="""Path to reference database. By default, the IGG_DB environmental variable is used""")
-	io.add_argument('--all', action='store_true', default=False,
-		help="""Output results for all species, including those that were not detected (False)""")
-	io.add_argument('--no-sort', action='store_true', default=False,
-		help="""Do not order species by descreasing abundnce in output file (False)
-Useful with combined with '--all' to enforce same ordering of species across multiple output files""")
-	io.add_argument('--hq-only', action='store_true', default=False,
-		help="""Only report results for species with at least 1 high-quality genome (False)""")
+		
 	speed = parser.add_argument_group('pipeline speed')
-	speed.add_argument('-n', type=int, dest='max_reads',
-		help='# reads to use from input file(s) (use all)')
-	speed.add_argument('-t', dest='threads', default=1,
-		help='Number of threads to use (1)')
+	speed.add_argument('--max-reads', type=int, dest='max_reads', metavar='INT',
+		help='Number of reads to use from input file(s) (use all)')
+	speed.add_argument('--threads', dest='threads', default=1, metavar='INT',
+		help='Number of threads to use for read-aignment (1)')
 	speed.add_argument('--no-align', action='store_true', default=False,
-		help="""Skip read alignment if <outdir>/mapped_reads.bam already exists (False)""")
+		help="""Skip read alignment if 'mapped_reads.bam' already exists (False)
+Useful for rerunning pipeline with different options""")
 	speed.add_argument('--test', action='store_true', default=False,
 		help="""Perform a quick testing run (False)""")
 	speed.add_argument('--max_genes', type=int, help=argparse.SUPPRESS)
+
 	map = parser.add_argument_group('alignment/quality control')
 	map.add_argument('--mapid', type=float, metavar='FLOAT',
 		default=95.0, help='Discard reads with alignment identity < MAPID (95.0)')
@@ -78,12 +74,22 @@ Useful with combined with '--all' to enforce same ordering of species across mul
 		default=20.0, help='Minimum average-base-quality per read (20.0)')
 	map.add_argument('--mapq', type=float, metavar='FLOAT',
 		default=0, help='Minimum map quality score per read (0)')
-	map.add_argument('--pres', type=float, default=15,
-		help="""Species presence-absence threshold,
+
+	species = parser.add_argument_group('species filtering')
+	species.add_argument('--all', action='store_true', default=False,
+		help="""Output results for all species, including those that were not detected (False)""")
+	species.add_argument('--no-sort', action='store_true', default=False,
+		help="""Do not order species by abundance in output file (False)
+Useful when combined with '--all' to enforce same ordering of species across multiple output files""")
+	species.add_argument('--hq-only', action='store_true', default=False,
+		help="""Only report species with at least 1 high-quality genome (False)""")
+	species.add_argument('--min-markers', type=int, default=None, metavar='INT',
+		help="""Exclude species with fewer than <min-markers> (0)""")
+	species.add_argument('--pres', type=float, default=15, metavar='FLOAT',
+		help="""Threshold for determining species presence-absence,
 defined at the percent of a species' marker genes with >=1 mapped read.
 Useful for eliminating spurious hits (15)""")
-	map.add_argument('--min-markers', type=int, default=None,
-		help="""Exclude species with fewer than <min-markers> (0)""")
+
 	args = vars(parser.parse_args())
 	args['file_type'] = iggsearch.utility.auto_detect_file_type(args['m1'].split(',')[0])
 	check_args(args)

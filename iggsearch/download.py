@@ -25,10 +25,10 @@ The gut-only database is faster and requires less memory""")
 
 def download(args):
 	if args['gut_only']:
-		url = 'https://www.dropbox.com/s/94ca0jdd3b9naie/iggdb_v1.0.0_gut.tar.gz?dl=0'
+		url = 'https://www.dropbox.com/s/94ca0jdd3b9naie/iggdb_v1.0.0_gut.tar.gz'
 		out = '%s/iggdb_v1.0.0_gut.tar.gz' % args['out']
 	else:
-		url = 'https://www.dropbox.com/s/hewdo8tgq9oyynh/iggdb_v1.0.0.tar.gz?dl=0'
+		url = 'https://www.dropbox.com/s/hewdo8tgq9oyynh/iggdb_v1.0.0.tar.gz'
 		out = '%s/iggdb_v1.0.0.tar.gz' % args['out']
 	import subprocess
 	cmd = "wget -O %s %s" % (out, url)
