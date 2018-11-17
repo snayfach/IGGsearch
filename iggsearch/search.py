@@ -86,9 +86,9 @@ Useful when combined with '--all' to enforce same ordering of species across mul
 	species.add_argument('--min-markers', type=int, default=None, metavar='INT',
 		help="""Exclude species with fewer than <min-markers> (0)""")
 	species.add_argument('--pres', type=float, default=15, metavar='FLOAT',
-		help="""Threshold for determining species presence-absence,
-defined at the percent of a species' marker genes with >=1 mapped read.
-Useful for eliminating spurious hits (15)""")
+		help="""Cutoff for determining species presence-absence.
+Cutoff is defined at the %% of marker gene detected per species.
+Useful for eliminating false positives (15)""")
 
 	args = vars(parser.parse_args())
 	args['file_type'] = iggsearch.utility.auto_detect_file_type(args['m1'].split(',')[0])
