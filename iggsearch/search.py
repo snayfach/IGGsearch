@@ -50,13 +50,15 @@ Can be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2)
 Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq""")
 	io.add_argument('--m2', type=str, dest='m2', metavar='PATH',
 		help="""FASTA/FASTQ file containing 2nd mate if using paired-end reads.""")
-	io.add_argument('--db_dir', type=str, dest='db_dir', default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None, metavar='PATH',
+	io.add_argument('--db_dir', type=str, default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None, metavar='PATH',
 		help="""Path to reference database. By default, the IGG_DB environmental variable is used""")
-		
+	io.add_argument('--exclude_genes', metavar='PATH', type=str,
+		help="""File containing newline-separated list of marker gene identifiers to exclude""")
+
 	speed = parser.add_argument_group('pipeline speed')
 	speed.add_argument('--max-reads', type=int, dest='max_reads', metavar='INT',
 		help='Number of reads to use from input file(s) (use all)')
-	speed.add_argument('--threads', dest='threads', default=1, metavar='INT',
+	speed.add_argument('--threads', default=1, metavar='INT',
 		help='Number of threads to use for read-aignment (1)')
 	speed.add_argument('--no-align', action='store_true', default=False,
 		help="""Skip read alignment if 'mapped_reads.bam' already exists (False)
@@ -104,7 +106,7 @@ def check_args(args):
 		sys.exit(error)
 	args['db_base'] = '%s/%s' % (args['db_dir'], args['db_dir'].split('/')[-1])
 	if not os.path.exists(args['db_dir']):
-		error = "\nError: Specified reference database does not exist: %s" % os.path.dirname(args['db_dir'])
+		error = "\nError: Specified reference database does not exist: %s\n" % args['db_dir']
 		sys.exit(error)
 	for file in []:
 		path = '%s/%s' % (args['db_dir'], file)
@@ -179,7 +181,7 @@ def init_db_info(args):
 def map_reads_bt2(args):
 	
 	out = '%s/mapped_reads.bam' % args['outdir']
-	if os.path.exists(out) and args['no_align']:
+	if os.path.exists(out) and os.stat(out).st_size > 0 and args['no_align']:
 		print("  nothing to do")
 		return
 	

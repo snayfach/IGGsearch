@@ -34,7 +34,7 @@ Bowtie2 and samtools should be present on your path:
 
 <b>Update your environment:</b>   
 `export PYTHONPATH=$PYTHONPATH:/path/to/IGGsearch`  
-`export PATH=$PATH:/path/to/IGGsearch/scripts`  
+`export PATH=$PATH:/path/to/IGGsearch`  
 
 Note: replace `/path/to` with the correct file path on your system
 
@@ -47,7 +47,7 @@ Install:`export IGG_DB=/path/to/iggdb_v1.0.0_gut`
 Note: use `run_iggsearch.py download` to download full database including non-gut species
 
 <b>Test the code using the dummy dataset:</b>  
-`run_iggsearch.py search -1 test.fastq.gz -o test --test`
+`run_iggsearch.py search --m1 test.fastq.gz --outdir test --test`
 
 ## Program options
 

@@ -33,7 +33,8 @@ if __name__ == "__main__":
 		from iggsearch import download
 		download.main()
 	elif program == 'merge':
-		sys.exit("\nComing soon...\n")
+		from iggsearch import merge
+		merge.main()
 	elif program == 'reformat':
 		sys.exit("\nComing soon...\n")
 
