@@ -17,9 +17,6 @@ def get_program():
 		print('')
 		print('Note: use iggsearch.py <command> -h to view usage for a specific command')
 		quit()
-	elif sys.argv[1] not in ['download', 'search', 'merge', 'reformat']:
-		sys.exit("\nError: Unrecognized command: '%s'\n" % sys.argv[1])
-		quit()
 	else:
 		return sys.argv[1]
 
@@ -36,6 +33,7 @@ if __name__ == "__main__":
 		from iggsearch import merge
 		merge.main()
 	elif program == 'reformat':
-		sys.exit("\nComing soon...\n")
-
-
+		from iggsearch import reformat
+		reformat.main()
+	elif program not in ['download', 'search', 'merge', 'reformat']:
+		sys.exit("\nError: Unrecognized command: '%s'\n" % program)
