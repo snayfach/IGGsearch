@@ -32,7 +32,7 @@ def download(args):
 		out = '%s/iggdb_v1.0.0.tar.gz' % args['out']
 	import subprocess
 	cmd = "wget -O %s %s" % (out, url)
-	print cmd
+	print(cmd)
 	p = sp.Popen(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
 	out, err = p.communicate()
 
