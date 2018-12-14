@@ -33,8 +33,8 @@ Bowtie2 and samtools should be present on your path:
 `git clone https://github.com/snayfach/IGGsearch`
 
 <b>Update your environment:</b>   
-`export PYTHONPATH=$PYTHONPATH:/path/to/IGGsearch`  
-`export PATH=$PATH:/path/to/IGGsearch`  
+`export PYTHONPATH=$PYTHONPATH:/path/to/IGGsearch/iggsearch`
+`export PATH=$PATH:/path/to/IGGsearch/iggsearch`
 
 Note: replace `/path/to` with the correct file path on your system
 
