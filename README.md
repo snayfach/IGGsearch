@@ -9,6 +9,9 @@ Marker genes were identified from 209,320 genomes from the [IGGdb](https://githu
 
 Currently, there are two available marker-gene databases: for all 23,790 species and for only 4,558 species from the human gut microbiome. 
 
+<b>If the code is useful, please cite: http://dx.doi.org/10.1038/s41586-019-1058-x</b>
+
+
 ## Quick start
 
 <b>Install dependencies:</b> 
