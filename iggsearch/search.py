@@ -19,6 +19,7 @@ class Gene:
 		self.depth = 0.0
 		self.intra_freq = None
 		self.inter_freq = None
+		self.alns = []
 
 def import_libraries():
 	import importlib
@@ -47,19 +48,17 @@ Name should correspond to unique identifier for your sample""")
 		help="""FASTA/FASTQ file containing 1st mate if using paired-end reads.
 Otherwise FASTA/FASTQ containing unpaired reads.
 Can be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2)
-Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq""")
+Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq)""")
 	io.add_argument('--m2', type=str, dest='m2', metavar='PATH',
 		help="""FASTA/FASTQ file containing 2nd mate if using paired-end reads.""")
 	io.add_argument('--db_dir', type=str, default=os.environ['IGG_DB'] if 'IGG_DB' in os.environ else None, metavar='PATH',
 		help="""Path to reference database. By default, the IGG_DB environmental variable is used""")
-	io.add_argument('--exclude_genes', metavar='PATH', type=str,
-		help="""File containing newline-separated list of marker gene identifiers to exclude""")
 
-	speed = parser.add_argument_group('pipeline speed')
+	speed = parser.add_argument_group('pipeline speed/throughput')
 	speed.add_argument('--max-reads', type=int, dest='max_reads', metavar='INT',
 		help='Number of reads to use from input file(s) (use all)')
 	speed.add_argument('--threads', default=1, metavar='INT',
-		help='Number of threads to use for read-aignment (1)')
+		help='Number of threads to use for read-alignment (1)')
 	speed.add_argument('--no-align', action='store_true', default=False,
 		help="""Skip read alignment if 'mapped_reads.bam' already exists (False)
 Useful for rerunning pipeline with different options""")
@@ -67,33 +66,60 @@ Useful for rerunning pipeline with different options""")
 		help="""Perform a quick testing run (False)""")
 	speed.add_argument('--max_genes', type=int, help=argparse.SUPPRESS)
 
-	map = parser.add_argument_group('alignment/quality control')
+	map = parser.add_argument_group('read alignment/quality control')
 	map.add_argument('--mapid', type=float, metavar='FLOAT',
-		default=95.0, help='Discard reads with alignment identity < MAPID (95.0)')
+		default=95.0, help='Minimum DNA alignment identity between read and marker gene database (95.0)')
 	map.add_argument('--aln_cov', type=float, metavar='FLOAT',
-		default=0.75, help='Discard reads with alignment coverage < ALN_COV (0.75)')
+		default=0.75, help='Minimum fraction of read covered by alignment (0.75)')
 	map.add_argument('--readq', type=float, metavar='FLOAT',
-		default=20.0, help='Minimum average-base-quality per read (20.0)')
+		default=20.0, help='Minimum average base quality score of reads (20.0)')
 	map.add_argument('--mapq', type=float, metavar='FLOAT',
-		default=0, help='Minimum map quality score per read (0)')
+		default=30.0, help='Minimum mapping quality of reads (30.0)')
 
-	species = parser.add_argument_group('species filtering')
-	species.add_argument('--all', action='store_true', default=False,
-		help="""Output results for all species, including those that were not detected (False)""")
-	species.add_argument('--no-sort', action='store_true', default=False,
-		help="""Do not order species by abundance in output file (False)
-Useful when combined with '--all' to enforce same ordering of species across multiple output files""")
-	species.add_argument('--hq-only', action='store_true', default=False,
-		help="""Only report species with at least 1 high-quality genome (False)""")
-	species.add_argument('--min-markers', type=int, default=None, metavar='INT',
-		help="""Exclude species with fewer than <min-markers> (0)""")
-	species.add_argument('--pres', type=float, default=15, metavar='FLOAT',
-		help="""Cutoff for determining species presence-absence.
-Cutoff is defined at the %% of marker gene detected per species.
-Useful for eliminating false positives (15)""")
+	species = parser.add_argument_group('species reporting')
+	species.add_argument('--min-reads-gene', type=int, default=2, metavar='INT',
+		help="""Minimum # of reads for detecting marker genes (2)""")
+	species.add_argument('--min-perc-genes', type=int, default=40, metavar='INT',
+		help="""Minimum %% of marker genes detected to report species (40)""")
+	species.add_argument('--min-sp-quality', type=int, default=0, metavar='INT',
+		help="""Minimum quality score to report species (50)
+where quality score = completeness - (5 x contamination) of best genome""")
+	species.add_argument('--all-species', action='store_true', default=False,
+		help="""Presets: --min-reads-gene=0 --min-perc-genes=0 --min-sp-quality=0""")
+	species.add_argument('--very-lenient', action='store_true', default=False,
+		help="""Presets: --min-reads-gene=1 --min-perc-genes=1 --min-sp-quality=0""")
+	species.add_argument('--lenient', action='store_true', default=False,
+		help="""Presets: --min-reads-gene=1 --min-perc-genes=15 --min-sp-quality=25""")
+	species.add_argument('--strict', action='store_true', default=False,
+		help="""Presets: --min-reads-gene=2 --min-perc-genes=40 --min-sp-quality=50 (default)""")
+	species.add_argument('--very-strict', action='store_true', default=False,
+		help="""Presets: --min-reads-gene=5 --min-perc-genes=60 --min-sp-quality=75""")
 
 	args = vars(parser.parse_args())
 	args['file_type'] = iggsearch.utility.auto_detect_file_type(args['m1'].split(',')[0])
+
+	# presets
+	if args['all_species']:
+		args['min_reads_gene'] = 0
+		args['min_perc_genes'] = 0
+		args['min_sp_quality'] = 0
+	elif args['very_lenient']:
+		args['min_reads_gene'] = 1
+		args['min_perc_genes'] = 1.0
+		args['min_sp_quality'] = 0
+	elif args['lenient']:
+		args['min_reads_gene'] = 1
+		args['min_perc_genes'] = 15.0
+		args['min_sp_quality'] = 25
+	elif args['strict']:
+		args['min_reads_gene'] = 2
+		args['min_perc_genes'] = 40.0
+		args['min_sp_quality'] = 50
+	elif args['very_strict']:
+		args['min_reads_gene'] = 5
+		args['min_perc_genes'] = 60.0
+		args['min_sp_quality'] = 75
+
 	check_args(args)
 	return args
 
@@ -147,10 +173,6 @@ def init_db_info(args):
 
 	# initialize species
 	for r in csv.DictReader(open('%s.species' % args['db_base']), delimiter='\t'):
-		if args['hq_only'] and r['is_high_quality']=='No':
-			continue
-		if args['min_markers'] and int(r['marker_count']) < args['min_markers']:
-			continue
 		sp = Species()
 		sp.id = r['species_id']
 		sp.name = r['species_name']
@@ -158,12 +180,21 @@ def init_db_info(args):
 		sp.otus = r['phylo_taxonomy']
 		db[r['species_alt_id']] = sp
 	
+	# add species quality statistics
+	inpath = '%s/species_quality.tsv' % os.path.dirname(os.path.realpath(__file__))
+	for r in csv.DictReader(open(inpath), delimiter='\t'):
+		if r['species_alt_id'] in db:
+			sp = db[r['species_alt_id']]
+			sp.quality_score = float(r['max_qs'])
+	
 	# markers
 	for index, r in enumerate(csv.DictReader(open('%s.markers' % args['db_base']), delimiter='\t')):
 		if args['max_genes'] and index == args['max_genes']: break
 		if r['species_alt_id'] not in db: continue
 		gene = Gene()
 		gene.length = int(r['length'])
+		gene.intra_freq = float(r['intra_freq'])
+		gene.inter_count = int(r['inter_count'])
 		db[r['species_alt_id']].genes[r['marker_id']] = gene
 
 	# compute some summary statistics
@@ -234,6 +265,7 @@ def count_reads_bt2(args, db):
 	aligned = 0
 	mapped = 0
 	bam_path =  '%s/mapped_reads.bam' % args['outdir']
+	import pysam
 	bamfile = pysam.AlignmentFile(bam_path, "r")
 	for index, aln in enumerate(bamfile.fetch(until_eof = True)):
 	
@@ -245,8 +277,6 @@ def count_reads_bt2(args, db):
 	
 		# filter alignments
 		aligned += 1
-		args['readq'] = 0
-		args['mapq'] = 0
 		if not keep_aln(aln, args['mapid'], args['readq'], args['mapq'], args['aln_cov']):
 			continue
 		mapped += 1
@@ -254,6 +284,7 @@ def count_reads_bt2(args, db):
 		# count alignment
 		aln_len = len(aln.query_alignment_sequence)
 		gene = db[species_id].genes[marker_id]
+		#gene.alns.append(aln)
 		gene.reads += 1
 		gene.bases += aln_len
 		gene.depth += 1.0*gene.bases/gene.length
@@ -261,42 +292,54 @@ def count_reads_bt2(args, db):
 	print("  total aligned reads: %s" % aligned)
 	print("  aligned reads after filtering: %s" % mapped)
 
+
 def quantify_abundance(args, db):
-	total_depth = 0
+	
+	# summarize alignments per species
 	for id, sp in db.items():
 		genes = sp.genes.values()
 		if sp.length > 0:
 			sp.depth = sum([g.bases for g in genes])/float(sp.length)
 			sp.reads = sum([g.reads for g in genes])
-			sp.percent = 100*numpy.mean([1 if g.reads > 0 else 0 for g in genes])
+			sp.detected = len([1 for g in genes if g.reads >= args['min_reads_gene']])
+			sp.percent = 100.0*sp.detected/len(genes)
+
+	# prune species
+	del_species = []
+	for id, sp in db.items():
+		if sp.quality_score < args['min_sp_quality']:
+			del_species.append(id)
+		elif sp.percent < args['min_perc_genes']:
+			del_species.append(id)
+	for id in del_species:
+		del db[id]
+
+	# quantify abundance
+	total_depth = 0
+	for id, sp in db.items():
+		genes = sp.genes.values()
+		if sp.length > 0:
 			total_depth += sp.depth
 	for id, sp in db.items():
-		sp.pres = 1 if sp.percent >= args['pres'] else 0
-	for id, sp in db.items():
-		sp.abun = 100*sp.depth/total_depth if total_depth > 0 else 0.0 #and sp.pres = 1
-	total_reads = sum([sp.reads for sp in db.values()])
-	print("  mapped reads: %s" % total_reads)
-	total_species = sum([sp.pres for sp in db.values()])
-	print("  detected species (using presabs_cutoff): %s" % total_species)
-	total_species = sum([1 for sp in db.values() if sp.abun > 0])
-	print("  detected species (with non-zero abundance): %s" % total_species)
+		sp.abun = 100*sp.depth/total_depth if total_depth > 0 else 0.0
+
+	print("  reported species: %s" % len(db.values()))
+	print("  mapped reads: %s" % sum([sp.reads for sp in db.values()]))
+
 
 def write_profile(args, db):
 	out = open('%s/species_profile.tsv' % args['outdir'], 'w')
 	fields = ['species_id', 'species_name',
 	          'marker_length', 'marker_count',
 			  'percent_markers_detected', 'total_mapped_reads', 'avg_read_depth',
-	          'species_abund', 'species_presence']
+	          'species_abund']
 	out.write('\t'.join(fields)+'\n')
 	
 	species_ids = db.keys()
-	if not args['no_sort']:
-		abundances = [sp.abun for sp in db.values()]
-		species_ids = [id for abun, id in sorted(zip(abundances, species_ids), reverse=True)]
+	abundances = [sp.abun for sp in db.values()]
+	species_ids = [id for abun, id in sorted(zip(abundances, species_ids), reverse=True)]
 	
 	for id in species_ids:
-		if not args['all'] and db[id].reads == 0:
-			continue
 		row = []
 		row.append(db[id].id)
 		row.append(db[id].name)
@@ -306,9 +349,17 @@ def write_profile(args, db):
 		row.append(db[id].reads)
 		row.append(db[id].depth)
 		row.append(db[id].abun)
-		row.append(db[id].pres)
 		out.write('\t'.join([str(_) for _ in row])+'\n')
 	out.close()
+
+def write_markers(args, db):
+	out = open('%s/marker_profile.tsv' % args['outdir'], 'w')
+	fields = ['marker_id', 'species_id', 'gene_length', 'intra_freq', 'inter_count', 'num_reads']
+	out.write('\t'.join(fields)+'\n')
+	for spid, sp in db.items():
+		for geneid, gene in sp.genes.items():
+			row = [geneid, spid, gene.length, gene.intra_freq, gene.inter_count, gene.reads]
+			out.write('\t'.join([str(_) for _ in row])+'\n')
 
 def main():
 
@@ -330,8 +381,8 @@ def main():
 	module_start = time.time()
 	count_reads_bt2(args, db)
 	iggsearch.utility.log_time(program_start, module_start)
-
-	print("\n## Estimating abundance")
+	
+	print("\n## Identifying species and estimating abundance")
 	module_start = time.time()
 	quantify_abundance(args, db)
 	iggsearch.utility.log_time(program_start, module_start)
@@ -340,7 +391,6 @@ def main():
 	module_start = time.time()
 	write_profile(args, db)
 	iggsearch.utility.log_time(program_start, module_start)
-
 
 
 
