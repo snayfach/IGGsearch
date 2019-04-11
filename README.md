@@ -1,6 +1,6 @@
 # IGGsearch
 
-This repository allows you to recapitulate metagenomic species profiling performed in http://dx.doi.org/10.1038/s41586-019-1058-x. The pipeline is being actively improved and may change in the future.
+This repository allows you to perform metagenomic species profiling described by http://dx.doi.org/10.1038/s41586-019-1058-x. The pipeline is being actively improved and may change in the future.
 
 <b>Database information</b>
 
@@ -72,38 +72,39 @@ Options for the main module can be viewed using: `run_iggsearch.py search -h`
 IGGsearch: estimate species abundance from a single metagenome
 
 optional arguments:
-  -h, --help         show this help message and exit
+  -h, --help            show this help message and exit
 
 input/output:
-  --outdir PATH      Directory to store results.
-                     Name should correspond to unique identifier for your sample
-  --m1 PATH          FASTA/FASTQ file containing 1st mate if using paired-end reads.
-                     Otherwise FASTA/FASTQ containing unpaired reads.
-                     Can be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2)
-                     Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq
-  --m2 PATH          FASTA/FASTQ file containing 2nd mate if using paired-end reads.
-  --db_dir PATH      Path to reference database. By default, the IGG_DB environmental variable is used
+  --outdir PATH         Directory to store results.
+                        Name should correspond to unique identifier for your sample
+  --m1 PATH             FASTA/FASTQ file containing 1st mate if using paired-end reads.
+                        Otherwise FASTA/FASTQ containing unpaired reads.
+                        Can be gzip'ed (extension: .gz) or bzip2'ed (extension: .bz2)
+                        Use comma ',' to separate multiple input files (ex: -1 file1.fq,file2.fq)
+  --m2 PATH             FASTA/FASTQ file containing 2nd mate if using paired-end reads.
+  --db_dir PATH         Path to reference database. By default, the IGG_DB environmental variable is used
 
-pipeline speed:
-  --max-reads INT    Number of reads to use from input file(s) (use all)
-  --threads INT      Number of threads to use for read-aignment (1)
-  --no-align         Skip read alignment if 'mapped_reads.bam' already exists (False)
-                     Useful for rerunning pipeline with different options
-  --test             Perform a quick testing run (False)
+pipeline speed/throughput:
+  --max-reads INT       Number of reads to use from input file(s) (use all)
+  --threads INT         Number of threads to use for read-alignment (1)
+  --no-align            Skip read alignment if 'mapped_reads.bam' already exists (False)
+                        Useful for rerunning pipeline with different options
+  --test                Perform a quick testing run (False)
 
-alignment/quality control:
-  --mapid FLOAT      Discard reads with alignment identity < MAPID (95.0)
-  --aln_cov FLOAT    Discard reads with alignment coverage < ALN_COV (0.75)
-  --readq FLOAT      Minimum average-base-quality per read (20.0)
-  --mapq FLOAT       Minimum map quality score per read (0)
+read alignment/quality control:
+  --mapid FLOAT         Minimum DNA alignment identity between read and marker gene database (95.0)
+  --aln_cov FLOAT       Minimum fraction of read covered by alignment (0.75)
+  --readq FLOAT         Minimum average base quality score of reads (20.0)
+  --mapq FLOAT          Minimum mapping quality of reads (30.0)
 
-species filtering:
-  --all              Output results for all species, including those that were not detected (False)
-  --no-sort          Do not order species by abundance in output file (False)
-                     Useful when combined with '--all' to enforce same ordering of species across multiple output files
-  --hq-only          Only report species with at least 1 high-quality genome (False)
-  --min-markers INT  Exclude species with fewer than <min-markers> (0)
-  --pres FLOAT       Threshold for determining species presence-absence,
-                     defined at the percent of a species' marker genes with >=1 mapped read.
-                     Useful for eliminating spurious hits (15)
+species reporting:
+  --min-reads-gene INT  Minimum # of reads for detecting marker genes (2)
+  --min-perc-genes INT  Minimum % of marker genes detected to report species (40)
+  --min-sp-quality INT  Minimum quality score to report species (50)
+                        where quality score = completeness - (5 x contamination) of best genome
+  --all-species         Presets: --min-reads-gene=0 --min-perc-genes=0 --min-sp-quality=0
+  --very-lenient        Presets: --min-reads-gene=1 --min-perc-genes=1 --min-sp-quality=0
+  --lenient             Presets: --min-reads-gene=1 --min-perc-genes=15 --min-sp-quality=25
+  --strict              Presets: --min-reads-gene=2 --min-perc-genes=40 --min-sp-quality=50 (default)
+  --very-strict         Presets: --min-reads-gene=5 --min-perc-genes=60 --min-sp-quality=75
 ```                        
