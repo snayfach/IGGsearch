@@ -1,16 +1,12 @@
 # IGGsearch
-<b>Metagenomic species profiling with enhanced coverage of the human gut microbiome</b>
 
-IGGsearch accurately quantifies species presence-absence and species abundance by mapping reads to a database of species-specific marker genes. 
+This repository allows you to recapitulate metagenomic species profiling performed in http://dx.doi.org/10.1038/s41586-019-1058-x. The pipeline is being actively improved and may change in the future.
 
-Marker genes were identified based on two main criterea: i) conserved across genomes within a species, and ii) rarely occurring in genomes from different species. Additionally, marker genes for gut species were refined based on co-variation in abundance across metagenomes, which was especially important for species with just a single genome where gene conservation was challenging to estimate.
+<b>Database information</b>
+
+Species-specific marker genes were identified based on two main criterea: i) conserved across genomes within a species, and ii) rarely occurring in genomes from different species. Marker genes for gut species were additionally refined based on co-variation in abundance across metagenomes.
 
 Marker genes were identified from 209,320 genomes from the [IGGdb](https://github.com/snayfach/IGGdb), corresponding to 23,790 species based on 95% genome-wide average nucleotide identity. This genome set includes a large number of genomes from the Human Gut MAG dataset (N=60,664) as well as 148,656 reference genomes and MAGs from PATRIC and IMG.
-
-Currently, there are two available marker-gene databases: for all 23,790 species and for only 4,558 species from the human gut microbiome. 
-
-<b>If the code is useful, please cite: http://dx.doi.org/10.1038/s41586-019-1058-x</b>
-
 
 ## Quick start
 
