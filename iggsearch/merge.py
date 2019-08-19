@@ -133,7 +133,7 @@ def main():
 
 	print("\n## Writing matrix files")
 	module_start = time.time()
-	fields = [('species_presence', '0'),
+	fields = [#('species_presence', '0'),
 	          ('avg_read_depth', '0.0'),
 	          ('species_abund', '0.0'),
 	          ('percent_markers_detected', '0.0'),
