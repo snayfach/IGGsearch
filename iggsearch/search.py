@@ -81,7 +81,7 @@ Useful for rerunning pipeline with different options""")
 		help="""Minimum # of reads for detecting marker genes (2)""")
 	species.add_argument('--min-perc-genes', type=int, default=40, metavar='INT',
 		help="""Minimum %% of marker genes detected to report species (40)""")
-	species.add_argument('--min-sp-quality', type=int, default=0, metavar='INT',
+	species.add_argument('--min-sp-quality', type=int, default=50, metavar='INT',
 		help="""Minimum quality score to report species (50)
 where quality score = completeness - (5 x contamination) of best genome""")
 	species.add_argument('--all-species', action='store_true', default=False,
